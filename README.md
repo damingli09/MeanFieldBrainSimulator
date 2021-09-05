@@ -4,10 +4,16 @@ This repository contains models and code to simulate brain dynamics at parcel re
 
 General workflow: Create a model instance with some data and parameters input -> simulate model dynamics -> obtain metrics of interest from simulated data. You may compare simulated FC with some target FC to see how well the model performs, or to run some in-silico experiments.
 
+Sample usage (assuming the relevant packages are installed):
+
 ```
-model = SAR(SC, FC, k=0.8, sigma=1.0) 
-model.integrate(T=1000)
-model.convolveBOLD()
-model.setBOLD(model.bold)
-model.computeFC()
+from SAR import SAR
+model = SAR(SC, FC, k=0.8, sigma=1.0)  # create model instance
+model.integrate(T=1000)  # run simulation
+model.convolveBOLD()  # produce BOLD signal 
+model.setBOLD(model.bold)  # set the BOLD signal (by default should be the one above, but you can use anything)
+model.computeFC()  # compute function connectivity
+
+TS = model.rE  # simulated dynamics
+FC = model.simFC  # simulated FC matrix
 ```
