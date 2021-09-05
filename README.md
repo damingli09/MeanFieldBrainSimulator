@@ -7,8 +7,11 @@ General workflow: Create a model instance with some data and parameters input ->
 Sample usage (assuming the relevant packages are installed):
 
 ```
+import numpy as np
 from SAR import SAR
-model = SAR(SC, FC, k=0.8, sigma=1.0)  # create model instance
+
+SC = np.load('../data/Oh_38.npy')
+model = SAR(SC, FC=None, k=0.8, sigma=1.0)  # create model instance
 model.integrate(T=1000)  # run simulation
 model.convolveBOLD()  # produce BOLD signal 
 model.setBOLD(model.bold)  # set the BOLD signal (by default should be the one above, but you can use anything)
