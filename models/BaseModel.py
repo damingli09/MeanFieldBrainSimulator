@@ -10,9 +10,18 @@ import numpy as np
 import math
 from scipy.stats import pearsonr
 from sklearn.preprocessing import normalize
-import networkx as nx
-from community import community_louvain
 from tools import *
+import time
+from scipy.stats import gamma as statgamma
+from scipy.signal import fftconvolve
+from statsmodels.tsa.api import acf
+from sklearn.decomposition import PCA
+import scipy.optimize as opt
+import itertools
+from scipy.signal import hilbert, chirp, butter, filtfilt, welch
+from bct.algorithms.modularity import community_louvain
+from bct.algorithms.centrality import participation_coef
+import statsmodels.api as sm
 
 class BaseModel(object):
     """
@@ -56,7 +65,7 @@ class BaseModel(object):
 
         self.bold = np.zeros_like(dynamics)
         n = len(self.SC)
-        range_t = np.arange(dynamics.shape[1])*dt
+        range_t = np.arange(dynamics.shape[1])*self.dt
 
         fbold_vec = fbold(range_t, p=p, taub=taub, o=o)
         for i in range(n):
@@ -73,6 +82,37 @@ class BaseModel(object):
         """
 
         self.bold = TS
+
+    def butter_bandpass_filter(self, lowcut, highcut, fs, order=2):
+        """Performs a low, high or bandpass filter if low & highcut are in range"""
+        nyq = 0.5 * fs
+        low = lowcut / nyq
+        high = highcut / nyq
+        low_in_range = 0 < low < 1
+        high_in_range = 0 < high < 1
+        if low_in_range and high_in_range:
+            b, a = butter(order, [low, high], btype='band')
+        elif low_in_range and not high_in_range:
+            b, a = butter(order, low, btype='high')
+        elif not low_in_range and high_in_range:
+            b, a = butter(order, high, btype='low')
+        else:
+            return #self.bold
+        self.bold = filtfilt(b, a, self.bold)
+
+    def GSR(self, global_signal=None):
+        """Performs GSR and updates self.bold"""
+        if global_signal:
+            X = global_signal
+        else:
+            X = self.bold.mean(axis=0)
+        X = sm.add_constant(X)
+
+        n = len(self.SC)
+        for i in range(n):
+            y = self.bold[i,:]
+            reg = sm.OLS(y, X).fit()
+            self.bold[i,:] = np.array(reg.resid)
 
     def computeFC(self):
         """
@@ -147,13 +187,13 @@ class BaseModel(object):
         double
             Effective dimensionality
         """
-        
+
         df = np.transpose(self.bold)
         pca = PCA(n_components=len(self.SC))
         pca.fit(df)
-        singular = np.array(pca.singular_values_)
-        
-        return (np.sum(singular)**2)/np.sum(singular*singular)
+        explained_variance = np.array(pca.explained_variance_)
+
+        return (np.sum(explained_variance)**2)/np.sum(explained_variance*explained_variance)
 
     def boldfitAR1(self):
         """
@@ -167,36 +207,51 @@ class BaseModel(object):
         res = np.zeros(self.bold.shape[0])
 
         for i in range(self.bold.shape[0]):
-            res[i] = acf(self.bold[i,:], unbiased=True)[1]
+            res[i] = np.corrcoef(self.bold[i,:-1], self.bold[i,1:])[0,1]
 
         return res
 
-    def louvainQ(self, thr=-1):
+    def boldfitARn(self, n):
         """
-        Computes Louvain's Q
-        
-        Parameters
-        ----------
-        thr:
-            a non-negative threshold for cutoff of the FC matrix
+        Computes the ACF value at time lag = n.
+
         Returns
         -------
-        Q:
-            Louvain's Q measure for modularity
+        res: numpy array
+            ACF values at time lag = n for each ROI.
         """
-        
-        #W = np.clip(self.simFC, a_min=thr, a_max=None)
-        W = self.simFC
-        if thr >= 0:
-            W[W<thr] = 0
-        G = nx.from_numpy_array(W)
-        louvain_partition = community_louvain.best_partition(G, weight='weight')
-        Q = community_louvain.modularity(louvain_partition, G, weight='weight')
-        
-        return Q
+        res = np.zeros(self.bold.shape[0])
+
+        for i in range(self.bold.shape[0]):
+            res[i] = np.corrcoef(self.bold[i,:-n], self.bold[i,n:])[0,1]
+
+        return res
+
+    def louvain_Q(self):
+        """
+        Compute modules and segregation
+        """
+
+        fc = self.simFC
+        fc[np.where(fc<0)] = 0
+        labels,Q = community_louvain(fc, gamma=2, ci=None, B='modularity', seed=None)
+
+        return labels,Q
+
+    def mean_BA(self):
+        """
+        compute mean participation coefficient
+        """
+
+        fc = self.simFC
+        fc[np.where(fc<0)] = 0
+        _,Q = self.louvain_Q()
+        ci = [2,6,6,6,5,5,5,6,1,1,1,1,1,1,1,4,2,4,4,4,2,3,5,6,6,6,2,2,2,3,3,6,1,6,3,3,3,5]  # fulcher PNAS paper
+        BA = participation_coef(fc, ci=ci, degree='undirected')
+
+        return BA.mean(), Q  # integration, segregation
 
 
-    
 
 
 
